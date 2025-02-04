@@ -128,25 +128,25 @@ async function handleRequest(request: Request, env: Env) {
     return new Response(`plugin does not accept feedback`, {status: 403});
   }
 
-    // proxy the request to the plugin's server for processing, if defined.
-    if (pluginMetadata.FeedbackUrl != null) {
-      const init = {
-        body: JSON.stringify(reqBody),
-        method: "POST",
-        headers: {
-          "content-type": "application/json;charset=UTF-8",
-        },
-      }
-
-      const proxied = await fetch(pluginMetadata.FeedbackUrl, init);
-      if (proxied.status >= 200 && proxied.status < 300) {
-        return new Response();
-      } else {
-        return new Response(`proxy dispatch failed`, {status: 400});
-      }
+  // proxy the request to the plugin's server for processing, if defined.
+  if (pluginMetadata.FeedbackUrl != null) {
+    const init = {
+      body: JSON.stringify(reqBody),
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
     }
 
-    // once we're sure it's not some other service's responsibility, we can validate it and send it to our discord.
+    const proxied = await fetch(pluginMetadata.FeedbackUrl, init);
+    if (proxied.status >= 200 && proxied.status < 300) {
+      return new Response();
+    } else {
+      return new Response(`proxy dispatch failed`, {status: 400});
+    }
+  }
+
+  // once we're sure it's not some other service's responsibility, we can validate it and send it to our discord.
   if (!reqBody.content || !reqBody.version || !reqBody.dhash) {
     return new Response(`no content`, { status: 400 });
   }
@@ -228,16 +228,11 @@ const AI_SUMMARY_ENABLED = false;
 async function sendWebHook(
   reqBody: ConcreteFeedback,
   manifest: PluginManifest,
-  /*content: string,
-  name: string,
-  version: string,
-  reporter: string | null,*/
   reporterId: string | null,
-  /*exception: string | null,
-  dhash: string,*/
   env: Env
 ) {
   let {content, name, version, reporter, exception, dhash} = reqBody;
+
   var condensed = "User Feedback";
   if (AI_SUMMARY_ENABLED && content.length > 10 && content.length < 1200) {
     try
