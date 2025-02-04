@@ -8,7 +8,7 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { Env, Feedback } from "./types";
+import { ConcreteFeedback, Env, Feedback, PluginManifest } from "./types";
 import { APIEmbed, RESTPostAPIWebhookWithTokenJSONBody } from 'discord-api-types/v10';
 
 import { OpenAIApi, Configuration } from "openai";
@@ -24,6 +24,16 @@ async function readRequestBody(request: Request) {
   else {
     return null;
   }
+}
+
+async function getPluginMetadata(name: string) {
+  let response = await fetch(`https://kamori.goats.dev/Plugin/Plugin/${name}`);
+
+  if (response.status !== 200) {
+    return null;
+  }
+
+  return response.json<PluginManifest>();
 }
 
 function checkForbidden(input: string) {
@@ -104,15 +114,44 @@ function isFeedbackSilentlyIgnored(feedbackObject: Feedback) {
 async function handleRequest(request: Request, env: Env) {
   const reqBody = await readRequestBody(request) as Feedback;
 
-  if (!reqBody) {
+  if (!reqBody || !reqBody.name) {
     return new Response(`no body`, { status: 400 });
   }
 
-  if (!reqBody.content || !reqBody.version || !reqBody.name || !reqBody.dhash) {
+  // we can only accept/process mainline plugins.
+  let pluginMetadata = await getPluginMetadata(reqBody.name);
+  if (pluginMetadata == null) {
+    return new Response(`plugin not found`, {status: 404});
+  }
+
+  if (!pluginMetadata.AcceptsFeedback) {
+    return new Response(`plugin does not accept feedback`, {status: 403});
+  }
+
+    // proxy the request to the plugin's server for processing, if defined.
+    if (pluginMetadata.FeedbackUrl != null) {
+      const init = {
+        body: JSON.stringify(reqBody),
+        method: "POST",
+        headers: {
+          "content-type": "application/json;charset=UTF-8",
+        },
+      }
+
+      const proxied = await fetch(pluginMetadata.FeedbackUrl, init);
+      if (proxied.status >= 200 && proxied.status < 300) {
+        return new Response();
+      } else {
+        return new Response(`proxy dispatch failed`, {status: 400});
+      }
+    }
+
+    // once we're sure it's not some other service's responsibility, we can validate it and send it to our discord.
+  if (!reqBody.content || !reqBody.version || !reqBody.dhash) {
     return new Response(`no content`, { status: 400 });
   }
 
-  if (checkForbidden(reqBody.content) || checkForbidden(reqBody.name) || checkForbidden(reqBody.version) || checkForbidden(reqBody.dhash)) {
+  if (checkForbidden(reqBody.content) || checkForbidden(reqBody.version) || checkForbidden(reqBody.dhash)) {
     return new Response(`You are in violation of the following internatiÿÿÿÿ`, { status: 451 });
   }
 
@@ -122,18 +161,14 @@ async function handleRequest(request: Request, env: Env) {
 
   let reporterId = await getHashedIp(request, env);
 
-  let res = await sendWebHook(
-    reqBody.content,
-    reqBody.name,
-    reqBody.version,
-    reqBody.reporter,
+  let success = await sendWebHook(
+    reqBody as ConcreteFeedback,
+    pluginMetadata,
     reporterId,
-    reqBody.exception,
-    reqBody.dhash,
     env
   );
 
-  if (res == true) {
+  if (success) {
     return new Response();
   }
   else {
@@ -191,15 +226,18 @@ async function condenseText(body: string, token: string) {
 // This can be turned off if the account has run out of money or if some other issue has come up
 const AI_SUMMARY_ENABLED = false;
 async function sendWebHook(
-  content: string,
+  reqBody: ConcreteFeedback,
+  manifest: PluginManifest,
+  /*content: string,
   name: string,
   version: string,
-  reporter: string | null,
+  reporter: string | null,*/
   reporterId: string | null,
-  exception: string | null,
-  dhash: string,
+  /*exception: string | null,
+  dhash: string,*/
   env: Env
 ) {
+  let {content, name, version, reporter, exception, dhash} = reqBody;
   var condensed = "User Feedback";
   if (AI_SUMMARY_ENABLED && content.length > 10 && content.length < 1200) {
     try
@@ -219,15 +257,15 @@ async function sendWebHook(
   }
 
   const embed: APIEmbed = {
-    "title": "Feedback for " + name,
+    "title": "Feedback for " + (manifest.Name ?? name),
     "description": content,
     "author": {
       "name": "Unknown Reporter"
     },
-    "color": 11289400,
+    "color": 0xAC4338,
     "timestamp": new Date().toISOString(),
     "thumbnail": {
-      "url": "https://raw.githubusercontent.com/goatcorp/DalamudPluginsD17/main/stable/" + name + "/images/icon.png"
+      "url": manifest.IconUrl ?? `https://raw.githubusercontent.com/goatcorp/DalamudPluginsD17/main/stable/${name}/images/icon.png`
     },
     "fields": [
       {

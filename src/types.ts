@@ -14,3 +14,20 @@ export type Feedback = {
   reporter: string | null;
   exception: string | null;
 };
+
+// To make working with this easier, once we've confirmed
+// these values aren't null we can switch the type to this.
+export type ConcreteFeedback = Feedback & {
+  content: string;
+  name: string;
+  dhash: string;
+  version: string;
+};
+
+
+export type PluginManifest = {
+  Name: string;
+  AcceptsFeedback: boolean;
+  FeedbackUrl: string | null;
+  IconUrl: string | null;
+};
